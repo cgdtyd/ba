@@ -492,7 +492,7 @@ tbody tr:hover td{background:#f8fbff}
         <form class="panel form" id="priceForm"><div class="panel-head"><h2>Atualizar preço</h2></div>
           <label>Material<select name="material_id" id="priceMaterial" required></select></label><label>Compra (R$/kg)<input name="buy_price" type="number" step="0.01" min="0" required></label><label>Venda (R$/kg)<input name="sell_price" type="number" step="0.01" min="0" required></label><label>Vigência<input name="effective_date" type="date" required></label><button class="primary">Salvar nova tabela</button>
         </form>
-        <div class="panel"><div class="panel-head"><div><h2>Preços atuais</h2><p>Edite compra/venda direto na tabela e salve só o que mudou.</p></div><button class="primary" type="button" onclick="saveInlinePrices()">Salvar alterações</button></div><input id="priceSearch" type="search" placeholder="Buscar material..." style="width:100%;margin-bottom:12px;padding:9px 10px;border:1px solid var(--line-strong);border-radius:2px"><div class="table-wrap"><table><thead><tr><th>Material</th><th>Compra R$/kg</th><th>Venda R$/kg</th><th>Vigência</th></tr></thead><tbody id="pricesTable"></tbody></table></div></div>
+        <div class="panel"><div class="panel-head"><div><h2>Preços atuais</h2><p>Edite compra/venda direto na tabela e salve só o que mudou.</p></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="ghost" type="button" onclick="importDefaultTable()">Substituir pela tabela padrão (20/03/2026)</button><button class="primary" type="button" onclick="saveInlinePrices()">Salvar alterações</button></div></div><input id="priceSearch" type="search" placeholder="Buscar material..." style="width:100%;margin-bottom:12px;padding:9px 10px;border:1px solid var(--line-strong);border-radius:2px"><div class="table-wrap"><table><thead><tr><th>Material</th><th>Compra R$/kg</th><th>Venda R$/kg</th><th>Vigência</th></tr></thead><tbody id="pricesTable"></tbody></table></div></div>
       </div>
     </section>
 
@@ -1390,6 +1390,30 @@ async function loadClients(){const rows=await api('/api/clients');document.getEl
 async function loadSuppliers(){const rows=await api('/api/suppliers');document.getElementById('suppliersList').innerHTML=rows.map(r=>`<div class="info-card"><strong>${esc(r.name)}</strong><p>${esc(r.document||'Sem documento')} • ${esc(r.phone||'Sem telefone')}<br>PIX: ${esc(r.pix_key||'Não informado')}</p></div>`).join('')||'<p>Sem fornecedores.</p>'}
 async function loadPrices(){const rows=await api('/api/prices');const q=(document.getElementById('priceSearch')?.value||'').toLowerCase().trim();const inp='style="width:95px;padding:6px 8px;border:1px solid var(--line-strong);border-radius:2px"';document.getElementById('pricesTable').innerHTML=rows.filter(r=>!q||r.name.toLowerCase().includes(q)).map(r=>`<tr data-mid="${r.material_id}"><td>${esc(r.name)}</td><td><input ${inp} type="number" step="0.01" min="0" data-side="buy" data-orig="${(r.buy_cents_per_kg/100).toFixed(2)}" value="${(r.buy_cents_per_kg/100).toFixed(2)}"></td><td><input ${inp} type="number" step="0.01" min="0" data-side="sell" data-orig="${(r.sell_cents_per_kg/100).toFixed(2)}" value="${(r.sell_cents_per_kg/100).toFixed(2)}"></td><td>${esc(r.effective_date||'—')}</td></tr>`).join('')||'<tr><td colspan="4">Nenhum material encontrado</td></tr>'}
 document.getElementById('priceSearch')?.addEventListener('input',loadPrices);
+
+function normName(n){return String(n||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim()}
+async function importDefaultTable(){
+  try{
+    const seed=seedDB(),seedNames=new Set(seed.materials.map(m=>normName(m.name)));
+    const isUsed=m=>DB.purchases.some(x=>Number(x.material_id)===Number(m.id))||DB.sales.some(x=>Number(x.material_id)===Number(m.id));
+    const old=DB.materials.filter(m=>!seedNames.has(normName(m.name)));
+    const toDelete=old.filter(m=>!isUsed(m)),toHide=old.filter(isUsed);
+    if(!confirm(`Substituir a lista de materiais pela tabela padrão (71 materiais, preços de compra de 20/03/2026)?\n\n• ${toDelete.length} material(is) antigo(s) serão APAGADOS\n• ${toHide.length} material(is) antigo(s) têm compras/vendas e ficarão ocultos para preservar o histórico\n• Os preços de venda atuais dos materiais com mesmo nome são mantidos\n\nFaça um Backup antes se tiver dúvida.`))return;
+    const created=nowIso(),eff=todayIso();let added=0,updated=0;
+    const delIds=new Set(toDelete.map(m=>Number(m.id)));
+    DB.materials=DB.materials.filter(m=>!delIds.has(Number(m.id)));
+    DB.price_history=DB.price_history.filter(h=>!delIds.has(Number(h.material_id)));
+    toHide.forEach(m=>m.active=0);
+    for(const m of seed.materials){
+      let ex=DB.materials.find(x=>normName(x.name)===normName(m.name));
+      if(!ex){ex={id:nextId(DB.materials),name:m.name,unit:'kg',active:1,created_at:created};DB.materials.push(ex);added++}else{ex.active=1;updated++}
+      const buy=seed.price_history.find(h=>h.material_id===m.id)?.buy_cents_per_kg||0;
+      DB.price_history.push({id:nextId(DB.price_history),material_id:ex.id,buy_cents_per_kg:buy,sell_cents_per_kg:currentPrice(ex.id,'sell'),effective_date:eff,created_at:created});
+    }
+    saveDB();await refreshAll();
+    toast(`Tabela aplicada: ${added} novos, ${updated} atualizados, ${toDelete.length} apagados, ${toHide.length} ocultos`);
+  }catch(e){toast(e.message,true)}
+}
 async function saveInlinePrices(){
   const changed=[];document.querySelectorAll('#pricesTable tr[data-mid]').forEach(tr=>{const b=tr.querySelector('[data-side=buy]'),v=tr.querySelector('[data-side=sell]');if(b.value!==b.dataset.orig||v.value!==v.dataset.orig)changed.push({material_id:tr.dataset.mid,buy_price:b.value||0,sell_price:v.value||0})});
   if(!changed.length){toast('Nenhum preço foi alterado');return}
