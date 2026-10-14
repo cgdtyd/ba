@@ -770,8 +770,9 @@ function loadDB(key=STORAGE_KEY){
 }
 function loadJSON(key){try{return JSON.parse(localStorage.getItem(key)||'null')}catch{return null}}
 function companyStorageKey(companyId){return `${STORAGE_KEY}_company_${companyId}`}
-const DEFAULT_CLOUD_CONFIG={url:'https://zenlhyolltxvqpnbsihm.supabase.co',anonKey:'sb_publishable_6CLyOoVXv7LE578qNgX8FNO_z81vuwM0'};
-let cloud={config:loadJSON(CLOUD_CONFIG_KEY)||DEFAULT_CLOUD_CONFIG,session:loadJSON(CLOUD_SESSION_KEY),workspace:null,revision:null,dirty:false,syncing:false,conflict:false,syncTimer:null};
+const DEFAULT_CLOUD_CONFIG={url:'https://zenlhyplltxvgpnbslhm.supabase.co',anonKey:'sb_publishable_6CLyOoVXy7LE578qNx8FNQ_z81vuwM0'};
+try{localStorage.removeItem(CLOUD_CONFIG_KEY)}catch(e){}
+let cloud={config:DEFAULT_CLOUD_CONFIG,session:loadJSON(CLOUD_SESSION_KEY),workspace:null,revision:null,dirty:false,syncing:false,conflict:false,syncTimer:null};
 let DB=loadDB();
 function activeStorageKey(){return cloud.workspace?.company_id?companyStorageKey(cloud.workspace.company_id):STORAGE_KEY}
 function persistLocalOnly(){try{localStorage.setItem(activeStorageKey(),JSON.stringify(DB))}catch(e){throw new Error('Não foi possível salvar os dados no navegador. Faça um backup e libere espaço.')}}
